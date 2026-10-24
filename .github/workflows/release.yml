@@ -1,35 +1,41 @@
+# The app's release: build and pack on every pull request, sign and publish on a v* tag.
+#
+# The work itself lives in the org's shared workflow (instalador #31), pinned by commit
+# SHA, so the signing and packing rules are written once for every app. A pull request
+# only builds and packs the tarball — that is the PR build check. A v* tag must equal
+# v + the version in appinfo/info.xml, and then, inside this repo's `release` environment
+# (the app key's only home, with the owner as required reviewer), the shared workflow
+# signs SHA256SUMS with the app key, proves the signature against the suite's apps.pub,
+# and publishes exactly four assets: eurooffice.tar.gz, info.xml, SHA256SUMS and
+# SHA256SUMS.minisig. The build job never sees the key.
+#
+# The build is upstream's own artifact recipe (their artifact.yml): the two git submodules
+# first (assets/document-formats and assets/document-templates — the formats pin and the
+# empty-template locales; checkout does not fetch them), then the frontend (npm), then
+# composer with its Mozart post-install that scopes firebase/php-jwt into lib/Vendor —
+# vendor/ itself never ships, .nextcloudignore drops it, exactly like upstream's artifact.
+#
+# Fork versions stay monotonic and plain (the shared packer refuses anything but dotted
+# numbers): each fork release sits one patch above upstream's newest tag at rebase time,
+# so no app-store version is ever "newer" than what an establishment runs. This tag,
+# v11.0.7, is upstream 11.0.6 plus the fork's two branding commits.
+#
+# What lands in the tarball is governed by .nextcloudignore at the repo root.
 name: Release
 
 on:
+  pull_request:
   push:
-    tags:
-      - 'v*'
-
-permissions:
-  contents: write
+    tags: ["v*"]
 
 jobs:
   release:
-    runs-on: ubuntu-latest
-    # Only creates the GitHub release here. The app store release happens in
-    # nextcloud-releases/eurooffice, see RELEASING.md.
-    if: ${{ github.repository_owner == 'Euro-Office' }}
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Verify tag matches CHANGELOG.md and info.xml
-        env:
-          tag: ${{ github.ref_name }}
-        run: |
-          changelog=$(grep -Eo '[0-9]+(\.[0-9]+)+' CHANGELOG.md | head -n 1)
-          infoxml=$(grep -oP '(?<=<version>)[^<]+' appinfo/info.xml)
-          echo "tag=$tag changelog=$changelog info.xml=$infoxml"
-          [ "$tag" = "v$changelog" ] && [ "$tag" = "v$infoxml" ]
-      - name: Generate Changelog
-        run: |
-          awk '/## [0-9]/{p++} p; /## [0-9]/{if (p > 1) exit}' CHANGELOG.md | awk 'NR>2 {print last} {last=$0}' > RELEASE.md
-      - name: Create Release
-        uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd # v1.21.0
-        with:
-          bodyFile: RELEASE.md
-          tag: ${{ github.ref_name }}
+    uses: APS-Conecta/.github/.github/workflows/app-release.yml@7884528d4e283decc2c8e639cb6e9ca6ed180c80 # 2026-10-22
+    permissions:
+      contents: write
+    with:
+      app-id: eurooffice
+      build: git submodule update --init --recursive && npm ci && npm run build && composer install --no-dev --optimize-autoloader
+    secrets:
+      APP_SIGNING_KEY: ${{ secrets.APP_SIGNING_KEY }}
+      APP_SIGNING_KEY_PASSWORD: ${{ secrets.APP_SIGNING_KEY_PASSWORD }}
